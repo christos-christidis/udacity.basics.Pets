@@ -58,6 +58,14 @@ public class PetProvider extends ContentProvider {
                 throw new IllegalArgumentException("Query is not supported for " + uri);
         }
 
+        if (getContext() != null) {
+            // SOS: the cursor, AND the CursorLoader that "owns" it, tell contentResolver to notify
+            // them when data at this uri changes. We must also not forget to call notifyChange on
+            // the contentResolver whenever we change the data. The result will be that the catalog
+            // of pets will be updated immediately when the data changes!
+            cursor.setNotificationUri(getContext().getContentResolver(), uri);
+        }
+
         return cursor;
     }
 
@@ -90,17 +98,27 @@ public class PetProvider extends ContentProvider {
     public int delete(@NonNull Uri uri, @Nullable String selection, @Nullable String[] selectionArgs) {
         SQLiteDatabase db = mDbHelper.getWritableDatabase();
 
+        int rowsDeleted;
+
         int match = sUriMatcher.match(uri);
         switch (match) {
             case ALL_PETS:
-                return db.delete(PetContract.PetEntry.TABLE_NAME, selection, selectionArgs);
+                rowsDeleted = db.delete(PetContract.PetEntry.TABLE_NAME, selection, selectionArgs);
+                break;
             case SINGLE_PET:
                 selection = PetContract.PetEntry._ID + " = ?";
                 selectionArgs = new String[]{String.valueOf(ContentUris.parseId(uri))};
-                return db.delete(PetContract.PetEntry.TABLE_NAME, selection, selectionArgs);
+                rowsDeleted = db.delete(PetContract.PetEntry.TABLE_NAME, selection, selectionArgs);
+                break;
             default:
                 throw new IllegalArgumentException("Update is not supported for " + uri);
         }
+
+        if (rowsDeleted != 0 && getContext() != null) {
+            getContext().getContentResolver().notifyChange(uri, null);
+        }
+
+        return rowsDeleted;
     }
 
     @Override
@@ -108,11 +126,11 @@ public class PetProvider extends ContentProvider {
         int match = sUriMatcher.match(uri);
         switch (match) {
             case ALL_PETS:
-                return updatePet(values, selection, selectionArgs);
+                return updatePet(uri, values, selection, selectionArgs);
             case SINGLE_PET:
                 selection = PetContract.PetEntry._ID + " = ?";
                 selectionArgs = new String[]{String.valueOf(ContentUris.parseId(uri))};
-                return updatePet(values, selection, selectionArgs);
+                return updatePet(uri, values, selection, selectionArgs);
             default:
                 throw new IllegalArgumentException("Update is not supported for " + uri);
         }
@@ -129,10 +147,14 @@ public class PetProvider extends ContentProvider {
             return null;
         }
 
+        if (getContext() != null) {
+            getContext().getContentResolver().notifyChange(uri, null);
+        }
+
         return ContentUris.withAppendedId(uri, id);
     }
 
-    private int updatePet(ContentValues values, String selection, String[] selectionArgs) {
+    private int updatePet(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
         sanityCheckForUpdate(values);
 
         // if values contains no columns at all, return
@@ -142,7 +164,13 @@ public class PetProvider extends ContentProvider {
 
         SQLiteDatabase db = mDbHelper.getWritableDatabase();
 
-        return db.update(PetContract.PetEntry.TABLE_NAME, values, selection, selectionArgs);
+        int rowsUpdated = db.update(PetContract.PetEntry.TABLE_NAME, values, selection, selectionArgs);
+
+        if (rowsUpdated != 0 && getContext() != null) {
+            getContext().getContentResolver().notifyChange(uri, null);
+        }
+
+        return rowsUpdated;
     }
 
     private void sanityCheckForInsert(ContentValues values) {
